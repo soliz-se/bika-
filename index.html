@@ -2,8 +2,10 @@
 <html lang="ar" dir="rtl">
 <head>
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
+import { getDatabase, ref, set, onValue, get, child, push, update, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
   const firebaseConfig = {
     apiKey: "AIzaSyCrUrnMx9qgtiaaOXh_yN88BGGVxJQrucE",
     authDomain: "bikachoes.firebaseapp.com",
@@ -17,17 +19,17 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
-
-  // Now you can sync game state in real-time!
-  window.createOnlineRoom = function(roomCode, gameData) {
-    set(ref(db, 'rooms/' + roomCode), gameData);
-  };
-
-  window.joinOnlineRoom = function(roomCode, callback) {
-    onValue(ref(db, 'rooms/' + roomCode), (snapshot) => {
-      callback(snapshot.val());
-    });
-  };
+  
+  // Make available globally
+  window.db = db;
+  window.dbRef = ref;
+  window.dbSet = set;
+  window.dbOnValue = onValue;
+  window.dbGet = get;
+  window.dbPush = push;
+  window.dbUpdate = update;
+  window.dbRemove = remove;
+  window.dbOnDisconnect = onDisconnect;
 </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1862,12 +1864,15 @@
                 makePublicPack: 'جعل الباك عاماً (يظهر للجميع)',
                 questions: 'الأسئلة',
                 addQuestion: 'إضافة سؤال',
+                addQuestionImage: 'إضافة صورة',
                 savePack: '💾 حفظ الباك',
+                cancel: 'حذف هذا الباك؟',
                 
                 // Lobby
                 lobby: '🎪 الردهة',
                 roomCode: 'كود الغرفة:',
                 copyCode: '📋 نسخ الكود',
+                copied: 'تم النسخ!',
                 shareCode: 'شارك الكود مع أصدقائك!',
                 reportRoom: 'الإبلاغ عن الغرفة',
                 reportStatus: 'تم الإبلاغ! إذا وصل العدد 10 سيتم حذف الغرفة',
@@ -1985,12 +1990,16 @@
                 makePublicPack: 'Make pack public (visible to all)',
                 questions: 'Questions',
                 addQuestion: 'Add Question',
+                addQuestionImage: 'Add Image',
                 savePack: '💾 Save Pack',
+                cancel: 'Delete this pack?',
+                
                 
                 // Lobby
                 lobby: '🎪 Lobby',
                 roomCode: 'Room Code:',
                 copyCode: '📋 Copy Code',
+                copied: 'Copied!',
                 shareCode: 'Share the code with friends!',
                 reportRoom: 'Report Room',
                 reportStatus: 'Reported! If count reaches 10, room will be deleted',
@@ -2108,12 +2117,15 @@
                 makePublicPack: 'Rendre le pack public',
                 questions: 'Questions',
                 addQuestion: 'Ajouter',
+                addQuestionImage: 'Ajouter une image',
                 savePack: '💾 Enregistrer',
+                cancel: 'Supprimer ce pack ?',
                 
                 // Lobby
                 lobby: '🎪 Lobby',
                 roomCode: 'Code de la salle:',
                 copyCode: '📋 Copier',
+                copied: 'Copié!',
                 shareCode: 'Partagez le code avec vos amis!',
                 reportRoom: 'Signaler',
                 reportStatus: 'Signalé! Si 10 signalements, la salle sera supprimée',
@@ -2382,37 +2394,64 @@
         let isRuleWriter = false;
 
         // Initialize
-        function init() {
-            setLanguage(currentLang);
-            updatePlayerDisplay();
-            updateStats();
-            renderPublicPacks();
-            initCreatePack();
-            initAvatarGrid();
-            loadFriends();
-            
-            document.getElementById('nameInput').value = player.name;
-            document.getElementById('hostNameInput').value = player.name;
-            
-            document.getElementById('gameLogo').src = 'bikaa.png';
-            
-            document.getElementById('answerInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') submitAnswer();
-            });
-            
-            document.getElementById('joinCodeInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') joinRoom();
-            });
-            
-            const savedPublicPacks = localStorage.getItem('publicPacks');
-            if (savedPublicPacks) {
-                defaultPacks = JSON.parse(savedPublicPacks);
-            }
+async function init() {
+    setLanguage(currentLang);
+    updatePlayerDisplay();
+    updateStats();
+    renderPublicPacks();
+    initCreatePack();
+    initAvatarGrid();
+    
+    document.getElementById('nameInput').value = player.name;
+    document.getElementById('hostNameInput').value = player.name;
+    
+    document.getElementById('gameLogo').src = 'bikaa.png';
+    
+    document.getElementById('answerInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') submitAnswer();
+    });
+    
+    document.getElementById('joinCodeInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') joinRoom();
+    });
+    
+    const savedPublicPacks = localStorage.getItem('publicPacks');
+    if (savedPublicPacks) {
+        defaultPacks = JSON.parse(savedPublicPacks);
+    }
 
-            document.getElementById('chatInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') sendChatMessage();
-            });
+    document.getElementById('chatInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendChatMessage();
+    });
+    
+    // Wait for Firebase to be ready
+    while (!window.db) {
+        await new Promise(r => setTimeout(r, 100));
+    }
+    
+    // Save player to Firebase
+    try {
+        await window.dbSet(window.dbRef(window.db, `players/${player.id}`), {
+            name: player.name,
+            avatarEmoji: player.avatarEmoji,
+            avatarImage: player.avatarImage || null,
+            lastOnline: Date.now()
+        });
+        
+        // Set offline on disconnect
+        if (window.dbOnDisconnect) {
+            window.dbOnDisconnect(window.dbRef(window.db, `players/${player.id}/lastOnline`)).set(0);
         }
+        
+    } catch (error) {
+        console.error('Error saving player:', error);
+    }
+    
+    // Now load friends and requests
+    loadFriends();
+    loadRequests();
+}
+    
 
         function setLanguage(lang) {
             currentLang = lang;
@@ -2829,34 +2868,112 @@
             });
         }
 
-        function createRoom() {
-            player.name = document.getElementById('hostNameInput').value || player.name;
-            localStorage.setItem('player', JSON.stringify(player));
-            updatePlayerDisplay();
-            
-            const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-            document.getElementById('roomCode').textContent = roomCode;
-            
-            currentRoom = {
-                code: roomCode,
-                host: player.id,
-                hostName: player.name,
-                pack: selectedPack,
-                reports: 0,
-                reportedBy: [],
-                players: [{...player, isHost: true}]
-            };
-            isHost = true;
-            
-            document.getElementById('deleteRoomBtn').style.display = 'block';
-            document.getElementById('matchRuleDisplay').style.display = 'none';
-            document.getElementById('ruleWriterSection').style.display = 'block';
-            currentMatchRule = null;
-            ruleWriter = null;
-            
-            closeModal('hostSetupModal');
-            showScreen('lobbyScreen');
+        async function createRoom() {
+    if (!window.db) {
+        showToast('Firebase not ready!', true);
+        return;
+    }
+    
+    player.name = document.getElementById('hostNameInput').value || player.name;
+    localStorage.setItem('player', JSON.stringify(player));
+    updatePlayerDisplay();
+    
+    const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    
+    const roomData = {
+        code: roomCode,
+        hostId: player.id,
+        hostName: player.name,
+        pack: selectedPack,
+        status: 'waiting',
+        createdAt: Date.now(),
+        reports: 0,
+        reportedBy: [],
+        players: {
+            [player.id]: {
+                id: player.id,
+                name: player.name,
+                avatar: player.avatarEmoji || '👤',
+                avatarImage: player.avatarImage || null,
+                isHost: true,
+                score: 0
+            }
+        },
+        chat: {},
+        currentRound: 0,
+        matchRule: null
+    };
+    
+    try {
+        await window.dbSet(window.dbRef(window.db, `rooms/${roomCode}`), roomData);
+        
+        // Set up cleanup on disconnect
+        window.dbOnDisconnect(window.dbRef(window.db, `rooms/${roomCode}/players/${player.id}`)).remove();
+        
+        currentRoom = roomData;
+        isHost = true;
+        
+        document.getElementById('roomCode').textContent = roomCode;
+        document.getElementById('deleteRoomBtn').style.display = 'block';
+        document.getElementById('matchRuleDisplay').style.display = 'none';
+        document.getElementById('ruleWriterSection').style.display = 'block';
+        
+        // Listen for room updates
+        setupRoomListener(roomCode);
+        
+        closeModal('hostSetupModal');
+        showScreen('lobbyScreen');
+        
+    } catch (error) {
+        console.error(error);
+        showToast('Error creating room', true);
+    }
+}
+        function setupRoomListener(roomCode) {
+    const roomRef = window.dbRef(window.db, `rooms/${roomCode}`);
+    
+    window.dbOnValue(roomRef, (snapshot) => {
+        if (!snapshot.exists()) {
+            showToast(currentLang === 'ar' ? 'تم حذف الغرفة' : 'Room was deleted', true);
+            closeLobby();
+            return;
         }
+        
+        const data = snapshot.val();
+        currentRoom = { ...currentRoom, ...data };
+        
+        // Update players list
+        updatePlayersList(data.players);
+        
+        // Update match rule if set
+        if (data.matchRule) {
+            document.getElementById('matchRuleText').textContent = data.matchRule.rule[currentLang] || data.matchRule.rule.en;
+            document.getElementById('matchRuleRecommendation').textContent = data.matchRule.recommendation ? '💡 ' + (data.matchRule.recommendation[currentLang] || data.matchRule.recommendation.en) : '';
+            document.getElementById('matchRuleAuthor').textContent = (currentLang === 'ar' ? 'كتبها: ' : 'Written by: ') + (data.matchRuleAuthor || '');
+            document.getElementById('matchRuleDisplay').style.display = 'block';
+        }
+        
+        // Check if game started
+        if (data.status === 'playing' && currentScreen === 'lobbyScreen') {
+            startOnlineGame(data);
+        }
+    });
+}
+
+function updatePlayersList(players) {
+    const container = document.getElementById('playersList');
+    if (!players) return;
+    
+    container.innerHTML = Object.values(players).map(p => `
+        <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 15px; border: ${p.isHost ? '2px solid var(--accent)' : 'none'};">
+            <div style="font-size: 40px;">${p.avatarImage ? `<img src="${p.avatarImage}" style="width: 40px; height: 40px; border-radius: 50%;">` : (p.avatar || '👤')}</div>
+            <div>
+                <div style="font-weight: bold;">${p.name}</div>
+                ${p.isHost ? `<div style="font-size: 14px; opacity: 0.7;">👑 ${translations[currentLang].host || 'Host'}</div>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
 
         function selectRandomRuleWriter() {
             if (!currentRoom || currentRoom.players.length === 0) return;
@@ -2971,32 +3088,71 @@
             document.getElementById('joinModal').classList.add('active');
         }
 
-        function joinRoom() {
-            const code = document.getElementById('joinCodeInput').value.toUpperCase();
-            if (code.length < 4) {
-                showToast(currentLang === 'ar' ? 'كود غير صالح' : 'Invalid code', true);
-                return;
-            }
-            
-            document.getElementById('roomCode').textContent = code;
-            currentRoom = {
-                code: code,
-                host: 'other_player',
-                hostName: 'Host',
-                reports: 0,
-                reportedBy: [],
-                players: [{...player}, {id: 'host', name: 'Host', isHost: true}]
-            };
-            isHost = false;
-            
-            document.getElementById('deleteRoomBtn').style.display = 'none';
-            document.getElementById('ruleWriterSection').style.display = 'block';
-            document.getElementById('matchRuleDisplay').style.display = 'none';
-            
-            closeModal('joinModal');
-            showScreen('lobbyScreen');
-            showToast(currentLang === 'ar' ? 'تم الانضمام!' : 'Joined!');
+        async function joinRoom() {
+    const code = document.getElementById('joinCodeInput').value.toUpperCase().trim();
+    if (code.length < 4) {
+        showToast(currentLang === 'ar' ? 'كود غير صالح' : 'Invalid code', true);
+        return;
+    }
+    
+    if (!window.db) {
+        showToast('Firebase not loaded!', true);
+        return;
+    }
+    
+    try {
+        // Actually check Firebase for the room
+        const roomRef = window.dbRef(window.db, `rooms/${code}`);
+        const snapshot = await window.dbGet(roomRef);
+        
+        if (!snapshot.exists()) {
+            showToast(currentLang === 'ar' ? 'الغرفة غير موجودة' : 'Room not found', true);
+            return;
         }
+        
+        const roomData = snapshot.val();
+        
+        // Check if game already started
+        if (roomData.status === 'playing') {
+            showToast(currentLang === 'ar' ? 'اللعبة بدأت بالفعل' : 'Game already started', true);
+            return;
+        }
+        
+        // Add player to room
+        const playerData = {
+            id: player.id,
+            name: player.name,
+            avatar: player.avatarEmoji || '👤',
+            avatarImage: player.avatarImage || null,
+            score: 0,
+            joinedAt: Date.now()
+        };
+        
+        await window.dbUpdate(window.dbRef(window.db, `rooms/${code}/players/${player.id}`), playerData);
+        
+        // Set up listener for room changes
+        setupRoomListener(code);
+        
+        currentRoom = {
+            code: code,
+            ...roomData
+        };
+        isHost = false;
+        
+        document.getElementById('roomCode').textContent = code;
+        document.getElementById('deleteRoomBtn').style.display = 'none';
+        document.getElementById('ruleWriterSection').style.display = 'none';
+        document.getElementById('matchRuleDisplay').style.display = roomData.matchRule ? 'block' : 'none';
+        
+        closeModal('joinModal');
+        showScreen('lobbyScreen');
+        showToast(currentLang === 'ar' ? 'تم الانضمام!' : 'Joined!');
+        
+    } catch (error) {
+        console.error(error);
+        showToast('Error joining room', true);
+    }
+}
 
         function toggleChat() {
             const container = document.getElementById('chatContainer');
@@ -3311,104 +3467,246 @@
         }
 
         function loadFriends() {
-            const container = document.getElementById('friendsList');
-            const empty = document.getElementById('emptyFriends');
-            
-            if (friends.length === 0) {
-                container.innerHTML = '';
-                empty.style.display = 'block';
-                return;
-            }
-            
-            empty.style.display = 'none';
-            container.innerHTML = friends.map(friend => `
-                <div class="friend-list-item">
-                    <div class="friend-info" style="display: flex; align-items: center; gap: 10px;">
-                        <div style="font-size: 30px;">${friend.avatar || '👤'}</div>
-                        <div>
-                            <div style="font-weight: bold;">${friend.name}</div>
-                            <div style="font-size: 12px; opacity: 0.7;"><span class="online-status"></span> ${currentLang === 'ar' ? 'متصل' : currentLang === 'en' ? 'Online' : 'En ligne'}</div>
-                        </div>
-                    </div>
-                    <button class="btn btn-primary" onclick="inviteFriend('${friend.id}')">${currentLang === 'ar' ? 'دعوة' : currentLang === 'en' ? 'Invite' : 'Inviter'}</button>
-                </div>
-            `).join('');
+    if (!window.db) return;
+    
+    const friendsRef = window.dbRef(window.db, `players/${player.id}/friends`);
+    window.dbOnValue(friendsRef, (snapshot) => {
+        const data = snapshot.val() || {};
+        friends = Object.values(data);
+        
+        const container = document.getElementById('friendsList');
+        const empty = document.getElementById('emptyFriends');
+        
+        if (friends.length === 0) {
+            container.innerHTML = '';
+            empty.style.display = 'block';
+            return;
         }
-
-        function loadRequests() {
-            const container = document.getElementById('requestsList');
-            const empty = document.getElementById('emptyRequests');
-            const countBadge = document.getElementById('requestCount');
-            
-            if (friendRequests.length === 0) {
-                container.innerHTML = '';
-                empty.style.display = 'block';
-                countBadge.style.display = 'none';
-                return;
-            }
-            
-            empty.style.display = 'none';
-            countBadge.textContent = friendRequests.length;
-            countBadge.style.display = 'inline';
-            
-            container.innerHTML = friendRequests.map((req, index) => `
-                <div class="friend-list-item">
-                    <div class="friend-info" style="display: flex; align-items: center; gap: 10px;">
-                        <div style="font-size: 30px;">${req.avatar || '👤'}</div>
-                        <div>
-                            <div style="font-weight: bold;">${req.name}</div>
-                            <div style="font-size: 12px; opacity: 0.7;">${currentLang === 'ar' ? 'يريد الإضافة' : currentLang === 'en' ? 'Wants to add' : 'Veut ajouter'}</div>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-primary" onclick="acceptRequest(${index})">✓</button>
-                        <button class="btn btn-secondary" onclick="rejectRequest(${index})">✗</button>
+        
+        empty.style.display = 'none';
+        container.innerHTML = friends.map(friend => `
+            <div class="friend-list-item">
+                <div class="friend-info" style="display: flex; align-items: center; gap: 10px;">
+                    <div style="font-size: 30px;">${friend.avatar || '👤'}</div>
+                    <div>
+                        <div style="font-weight: bold;">${friend.name}</div>
+                        <div style="font-size: 12px; opacity: 0.7;"><span class="online-status"></span> ${currentLang === 'ar' ? 'متصل' : currentLang === 'en' ? 'Online' : 'En ligne'}</div>
                     </div>
                 </div>
-            `).join('');
-        }
+                <button class="btn btn-primary" onclick="inviteFriend('${friend.id}')">${currentLang === 'ar' ? 'دعوة' : currentLang === 'en' ? 'Invite' : 'Inviter'}</button>
+            </div>
+        `).join('');
+    });
+}
 
-        function searchFriend() {
-            const query = document.getElementById('friendSearchInput').value;
-            if (!query) return;
-            
-            const results = [
-                { id: 'sim_1', name: (currentLang === 'ar' ? 'لاعب ' : currentLang === 'en' ? 'Player ' : 'Joueur ') + Math.floor(Math.random() * 1000), avatar: '🎮' },
-                { id: 'sim_2', name: (currentLang === 'ar' ? 'بطل ' : currentLang === 'en' ? 'Hero ' : 'Héros ') + Math.floor(Math.random() * 1000), avatar: '🏆' }
-            ];
-            
-            document.getElementById('searchResults').innerHTML = results.map(r => `
-                <div class="friend-list-item" style="margin-top: 10px;">
-                    <div class="friend-info" style="display: flex; align-items: center; gap: 10px;">
-                        <div style="font-size: 30px;">${r.avatar}</div>
-                        <div style="font-weight: bold;">${r.name}</div>
+function loadRequests() {
+    if (!window.db) return;
+    
+    const requestsRef = window.dbRef(window.db, `players/${player.id}/requests`);
+    window.dbOnValue(requestsRef, (snapshot) => {
+        const data = snapshot.val() || {};
+        friendRequests = Object.values(data);
+        
+        const container = document.getElementById('requestsList');
+        const empty = document.getElementById('emptyRequests');
+        const countBadge = document.getElementById('requestCount');
+        
+        if (friendRequests.length === 0) {
+            container.innerHTML = '';
+            empty.style.display = 'block';
+            countBadge.style.display = 'none';
+            return;
+        }
+        
+        empty.style.display = 'none';
+        countBadge.textContent = friendRequests.length;
+        countBadge.style.display = 'inline';
+        
+        container.innerHTML = friendRequests.map((req, index) => `
+            <div class="friend-list-item">
+                <div class="friend-info" style="display: flex; align-items: center; gap: 10px;">
+                    <div style="font-size: 30px;">${req.fromAvatar || '👤'}</div>
+                    <div>
+                        <div style="font-weight: bold;">${req.fromName}</div>
+                        <div style="font-size: 12px; opacity: 0.7;">${currentLang === 'ar' ? 'يريد الإضافة' : currentLang === 'en' ? 'Wants to add' : 'Veut ajouter'}</div>
                     </div>
-                    <button class="btn btn-primary" onclick="sendRequest('${r.id}', '${r.name}', '${r.avatar}')">${currentLang === 'ar' ? 'إضافة' : currentLang === 'en' ? 'Add' : 'Ajouter'}</button>
                 </div>
-            `).join('');
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-primary" onclick="acceptRequest('${req.fromId}')">✓</button>
+                    <button class="btn btn-secondary" onclick="rejectRequest('${req.fromId}')">✗</button>
+                </div>
+            </div>
+        `).join('');
+    });
+}
+        
+    function startOnlineGame(roomData) {
+    // Convert Firebase players object to array
+    const players = Object.values(roomData.players || {});
+    allPlayers = players;
+    
+    // Start game with room's pack
+    selectedPack = roomData.pack;
+    const questions = shuffleArray([...selectedPack.questions]).slice(0, gameSettings.rounds);
+    
+    gameState = {
+        questions: questions,
+        currentIndex: 0,
+        score: 0,
+        rounds: questions.length,
+        timeLeft: gameSettings.time,
+        timePerQuestion: gameSettings.time,
+        answers: [],
+        status: 'playing',
+        playerScores: new Array(allPlayers.length).fill(0),
+        roundScores: new Array(allPlayers.length).fill(0)
+    };
+    
+    showScreen('gameScreen');
+    
+    if (roomData.matchRule) {
+        const ruleDiv = document.getElementById('gameMatchRule');
+        document.getElementById('gameMatchRuleText').textContent = 
+            roomData.matchRule.rule[currentLang] || roomData.matchRule.rule.en;
+        ruleDiv.style.display = 'block';
+    }
+    
+    updateScoreBoard();
+    startRound();
+}
+      async function searchFriend() {
+    const query = document.getElementById('friendSearchInput').value.trim().toLowerCase();
+    if (!query || !window.db) return;
+    
+    try {
+        const playersRef = window.dbRef(window.db, 'players');
+        const snapshot = await window.dbGet(playersRef);
+        
+        if (!snapshot.exists()) {
+            document.getElementById('searchResults').innerHTML = '<p>No players found</p>';
+            return;
         }
+        
+        const players = snapshot.val();
+        const results = Object.entries(players)
+            .filter(([id, p]) => 
+                id !== player.id && 
+                !friends.find(f => f.id === id) &&
+                (id.toLowerCase().includes(query) || 
+                 (p.name && p.name.toLowerCase().includes(query)))
+            )
+            .slice(0, 5);
+        
+        if (results.length === 0) {
+            document.getElementById('searchResults').innerHTML = '<p>No players found</p>';
+            return;
+        }
+        
+        document.getElementById('searchResults').innerHTML = results.map(([id, p]) => `
+            <div class="friend-list-item" style="margin-top: 10px;">
+                <div class="friend-info" style="display: flex; align-items: center; gap: 10px;">
+                    <div style="font-size: 30px;">${p.avatarEmoji || p.avatar || '👤'}</div>
+                    <div>
+                        <div style="font-weight: bold;">${p.name || 'Unknown'}</div>
+                        <div style="font-size: 11px; opacity: 0.6;">ID: ${id}</div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="sendRequest('${id}', '${p.name}', '${p.avatarEmoji || '👤'}')">
+                    ${currentLang === 'ar' ? 'إضافة' : currentLang === 'en' ? 'Add' : 'Ajouter'}
+                </button>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error(error);
+        document.getElementById('searchResults').innerHTML = '<p>Error searching</p>';
+    }
+}
+        
 
-        function sendRequest(id, name, avatar) {
-            showToast(currentLang === 'ar' ? 'تم إرسال الطلب!' : currentLang === 'en' ? 'Request sent!' : 'Demande envoyée!');
-            document.getElementById('searchResults').innerHTML = '';
-            document.getElementById('friendSearchInput').value = '';
-        }
+       async function sendRequest(targetPlayerId, targetName, targetAvatar) {
+    if (!window.db) {
+        showToast('Firebase not loaded!', true);
+        return;
+    }
+    
+    const requestData = {
+        fromId: player.id,
+        fromName: player.name,
+        fromAvatar: player.avatarEmoji || '👤',
+        timestamp: Date.now(),
+        status: 'pending'
+    };
+    
+    try {
+        // Save to target player's requests
+        await window.dbSet(
+            window.dbRef(window.db, `players/${targetPlayerId}/requests/${player.id}`), 
+            requestData
+        );
+        
+        // Also save to sender's sent requests
+        await window.dbSet(
+            window.dbRef(window.db, `players/${player.id}/sentRequests/${targetPlayerId}`),
+            { toId: targetPlayerId, toName: targetName, timestamp: Date.now() }
+        );
+        
+        showToast(currentLang === 'ar' ? 'تم إرسال الطلب!' : 'Request sent!');
+        document.getElementById('searchResults').innerHTML = '';
+        document.getElementById('friendSearchInput').value = '';
+    } catch (error) {
+        console.error(error);
+        showToast('Error sending request', true);
+    }
+}
+        
 
-        function acceptRequest(index) {
-            const req = friendRequests[index];
-            friends.push(req);
-            friendRequests.splice(index, 1);
-            localStorage.setItem('friends', JSON.stringify(friends));
-            localStorage.setItem('friendRequests', JSON.stringify(friendRequests));
-            loadRequests();
-            showToast(currentLang === 'ar' ? 'تمت الإضافة!' : currentLang === 'en' ? 'Added!' : 'Ajouté!');
-        }
+        async function acceptRequest(fromId) {
+    if (!window.db) return;
+    
+    try {
+        // Add to friends
+        const requestRef = window.dbRef(window.db, `players/${player.id}/requests/${fromId}`);
+        const requestSnap = await window.dbGet(requestRef);
+        const requestData = requestSnap.val();
+        
+        if (!requestData) return;
+        
+        // Add to both players' friends lists
+        await window.dbSet(window.dbRef(window.db, `players/${player.id}/friends/${fromId}`), {
+            id: fromId,
+            name: requestData.fromName,
+            avatar: requestData.fromAvatar,
+            addedAt: Date.now()
+        });
+        
+        await window.dbSet(window.dbRef(window.db, `players/${fromId}/friends/${player.id}`), {
+            id: player.id,
+            name: player.name,
+            avatar: player.avatarEmoji || '👤',
+            addedAt: Date.now()
+        });
+        
+        // Remove request
+        await window.dbRemove(requestRef);
+        await window.dbRemove(window.dbRef(window.db, `players/${fromId}/sentRequests/${player.id}`));
+        
+        showToast(currentLang === 'ar' ? 'تمت الإضافة!' : 'Added!');
+    } catch (error) {
+        console.error(error);
+    }
+}
 
-        function rejectRequest(index) {
-            friendRequests.splice(index, 1);
-            localStorage.setItem('friendRequests', JSON.stringify(friendRequests));
-            loadRequests();
-        }
+async function rejectRequest(fromId) {
+    if (!window.db) return;
+    
+    try {
+        await window.dbRemove(window.dbRef(window.db, `players/${player.id}/requests/${fromId}`));
+        await window.dbRemove(window.dbRef(window.db, `players/${fromId}/sentRequests/${player.id}`));
+    } catch (error) {
+        console.error(error);
+    }
+}
 
         function inviteFriend(friendId) {
             showToast(currentLang === 'ar' ? 'تم إرسال الدعوة!' : currentLang === 'en' ? 'Invite sent!' : 'Invitation envoyée!');
